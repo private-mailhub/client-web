@@ -1,0 +1,223 @@
+name: Deploy frontend
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mailhub-frontend-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.DEPLOYMENT_ENABLED == 'true' }}
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --engine-strict
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Validate production variables and build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_ENCRYPTION_KEY: ${{ secrets.VITE_ENCRYPTION_KEY }}
+        run: |
+          set -Eeuo pipefail
+
+          : "${VITE_API_URL:?VITE_API_URL is required}"
+          : "${VITE_ENCRYPTION_KEY:?VITE_ENCRYPTION_KEY is required}"
+          if [[ ! "$VITE_API_URL" =~ ^https?://[^/?#]+$ ]]; then
+            printf 'VITE_API_URL must be an HTTP(S) origin without a path\n' >&2
+            exit 1
+          fi
+          if [[ ! "$VITE_ENCRYPTION_KEY" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; then
+            printf 'VITE_ENCRYPTION_KEY must be Base64\n' >&2
+            exit 1
+          fi
+          decoded_key_bytes="$(printf '%s' "$VITE_ENCRYPTION_KEY" | base64 --decode 2>/dev/null | wc -c)"
+          decoded_key_bytes="${decoded_key_bytes//[[:space:]]/}"
+          if [[ "$decoded_key_bytes" != 32 ]]; then
+            printf 'VITE_ENCRYPTION_KEY must decode to 32 bytes\n' >&2
+            exit 1
+          fi
+
+          npm run build:prod
+
+      - name: Package production assets
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            printf 'Invalid workflow SHA: %s\n' "$RELEASE_SHA" >&2
+            exit 1
+          fi
+          test -f dist/index.html
+          test -d dist/assets
+
+          archive="$RUNNER_TEMP/mailhub-frontend-${RELEASE_SHA}-${GITHUB_RUN_ID}.tar.gz"
+          tar -czf "$archive" -C "$GITHUB_WORKSPACE" dist
+          printf 'FRONTEND_ARCHIVE=%s\n' "$archive" >> "$GITHUB_ENV"
+
+      - name: Validate immutable release script
+        run: bash test/deploy-release.sh
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Authorize runner and publish release
+        env:
+          AWS_SECURITY_GROUP: ${{ secrets.EC2_SECURITY_GROUP }}
+          RELEASE_SHA: ${{ github.sha }}
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_PORT: ${{ secrets.EC2_PORT || '22' }}
+          SSH_USER: ${{ secrets.EC2_USER || 'ubuntu' }}
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+
+          : "${AWS_SECURITY_GROUP:?EC2_SECURITY_GROUP is required}"
+          : "${FRONTEND_ARCHIVE:?frontend archive is required}"
+          : "${SSH_HOST:?EC2_HOST is required}"
+          : "${SSH_KEY:?EC2_SSH_KEY is required}"
+          : "${SSH_KNOWN_HOSTS:?EC2_KNOWN_HOSTS is required}"
+
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            printf 'Invalid workflow SHA: %s\n' "$RELEASE_SHA" >&2
+            exit 1
+          fi
+          if [[ ! "$SSH_PORT" =~ ^[0-9]+$ ]] || (( SSH_PORT < 1 || SSH_PORT > 65535 )); then
+            printf 'Invalid SSH port: %s\n' "$SSH_PORT" >&2
+            exit 1
+          fi
+
+          key_file="$RUNNER_TEMP/mailhub-frontend-deploy-key"
+          known_hosts_file="$RUNNER_TEMP/mailhub-frontend-known-hosts"
+          remote_archive="/tmp/mailhub-frontend-${RELEASE_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          ingress_added=false
+          archive_uploaded=false
+          runner_cidr=''
+
+          cleanup() {
+            original_status=$?
+            cleanup_status=0
+            set +e
+            if [[ "$archive_uploaded" == true ]]; then
+              if ! ssh \
+                -i "$key_file" \
+                -o BatchMode=yes \
+                -o ConnectTimeout=10 \
+                -o ConnectionAttempts=1 \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$known_hosts_file" \
+                -p "$SSH_PORT" \
+                "$SSH_USER@$SSH_HOST" \
+                "rm -f -- '$remote_archive'" \
+                >/dev/null 2>&1; then
+                printf 'Unable to remove remote archive: %s\n' "$remote_archive" >&2
+                cleanup_status=1
+              fi
+            fi
+            if [[ "$ingress_added" == true ]]; then
+              if ! aws ec2 revoke-security-group-ingress \
+                --cli-connect-timeout 10 \
+                --cli-read-timeout 30 \
+                --group-id "$AWS_SECURITY_GROUP" \
+                --protocol tcp \
+                --port "$SSH_PORT" \
+                --cidr "$runner_cidr" \
+                >/dev/null 2>&1; then
+                printf 'Unable to revoke temporary security-group ingress for %s\n' "$runner_cidr" >&2
+                cleanup_status=1
+              fi
+            fi
+            rm -f "$key_file" "$known_hosts_file"
+            if [[ "$original_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+              original_status="$cleanup_status"
+            fi
+            trap - EXIT
+            exit "$original_status"
+          }
+          trap cleanup EXIT
+
+          umask 077
+          printf '%s\n' "$SSH_KEY" > "$key_file"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$known_hosts_file"
+
+          runner_ip="$(curl --fail --silent --show-error https://checkip.amazonaws.com | tr -d '\r\n')"
+          if [[ ! "$runner_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            printf 'Invalid runner IP: %s\n' "$runner_ip" >&2
+            exit 1
+          fi
+          runner_cidr="${runner_ip}/32"
+
+          existing_rule="$(
+            aws ec2 describe-security-group-rules \
+              --cli-connect-timeout 10 \
+              --cli-read-timeout 30 \
+              --filters "Name=group-id,Values=$AWS_SECURITY_GROUP" \
+              --query "SecurityGroupRules[?IsEgress==\`false\` && IpProtocol==\`tcp\` && FromPort==\`$SSH_PORT\` && ToPort==\`$SSH_PORT\` && CidrIpv4==\`$runner_cidr\`].SecurityGroupRuleId" \
+              --output text
+          )"
+          if [[ -z "$existing_rule" || "$existing_rule" == 'None' ]]; then
+            aws ec2 authorize-security-group-ingress \
+              --cli-connect-timeout 10 \
+              --cli-read-timeout 30 \
+              --group-id "$AWS_SECURITY_GROUP" \
+              --protocol tcp \
+              --port "$SSH_PORT" \
+              --cidr "$runner_cidr"
+            ingress_added=true
+          fi
+
+          archive_uploaded=true
+          scp \
+            -i "$key_file" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" \
+            -P "$SSH_PORT" \
+            "$FRONTEND_ARCHIVE" \
+            "$SSH_USER@$SSH_HOST:$remote_archive"
+
+          ssh \
+            -i "$key_file" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" \
+            -p "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST" \
+            bash -s -- "$RELEASE_SHA" "$remote_archive" \
+            < "$GITHUB_WORKSPACE/deploy/release.sh"
