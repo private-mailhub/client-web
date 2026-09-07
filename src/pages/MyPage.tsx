@@ -47,15 +47,6 @@ const MyPage = () => {
     navigate('/mypage', { replace: true });
   }, [location.state, navigate, toast]);
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/');
-  };
-
-  const handleUserInfoUpdate = async () => {
-    // Will be redirected to home after email change
-  };
-
   const handleOAuthUpdate = async () => {
     try {
       const info = await getUserInfo();
@@ -76,7 +67,7 @@ const MyPage = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header isLoggedIn={true} onLogout={handleLogout} />
+        <Header isLoggedIn={true} />
         <main className="flex-1 container mx-auto px-4 py-8">
           <div className="text-center">Loading...</div>
         </main>
@@ -91,7 +82,7 @@ const MyPage = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header isLoggedIn={true} onLogout={handleLogout} />
+      <Header isLoggedIn={true} />
       <main className="flex-1 container mx-auto px-4 py-8">
         <div className="max-w-3xl mx-auto space-y-6">
           <div className="space-y-2">
@@ -122,10 +113,7 @@ const MyPage = () => {
               <CardTitle>Primary Email Management</CardTitle>
             </CardHeader>
             <CardContent>
-              <UpdatePrimaryEmail
-                currentEmail={userInfo.username}
-                onUpdate={handleUserInfoUpdate}
-              />
+              <UpdatePrimaryEmail currentEmail={userInfo.username} />
             </CardContent>
           </Card>
 
