@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import RelayEmailDashboard from '@/components/RelayEmailDashboard';
-import { getUsernameFromToken, logout } from '@/lib/api';
+import { getUserInfo, logout } from '@/lib/api';
 
 const DashboardPage = () => {
   const navigate = useNavigate();
@@ -10,14 +10,15 @@ const DashboardPage = () => {
 
   useEffect(() => {
     const initAuth = async () => {
-      const username = await getUsernameFromToken();
-      if (username) {
-        setUserEmail(username);
-      } else {
+      try {
+        const userInfo = await getUserInfo();
+        setUserEmail(userInfo.username);
+      } catch {
         await logout();
         navigate('/login', { replace: true });
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     initAuth();

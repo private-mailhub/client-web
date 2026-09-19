@@ -38,5 +38,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Validate production build does not expose encryption keys
+        run: bash test/production-build.sh
+
       - name: Validate immutable release script
         run: bash test/deploy-release.sh

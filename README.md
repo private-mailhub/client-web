@@ -1,7 +1,7 @@
 # Mailhub frontend
 
 React 18, TypeScript, Vite, and Tailwind UI for Mailhub.
-[API and worker repository](https://github.com/private-mailhub/mailhub).
+[API and worker repository](https://github.com/private-mailhub/backend-api).
 
 ![Mailhub](public/landing-main.png)
 
@@ -20,10 +20,11 @@ Open http://localhost:3000. Configure `VITE_API_URL` to the API origin, for exam
 localhost; it does not select same-origin requests. The existing Vite `/api` proxy remains,
 but absolute API URLs bypass it.
 
-`VITE_ENCRYPTION_KEY` must match the existing backend `ENCRYPTION_KEY` (32-byte Base64).
-It is visible in the browser bundle. Never pass JWT, AWS, Mailgun, or OAuth secrets to this
-build. Preserve the existing value during the split. Unprefixed APP_NAME/APP_DOMAIN retain
-existing fallback behavior; the Vite environment prefix is unchanged.
+Production builds must use an HTTPS API origin. The browser does not receive or use backend
+encryption keys: authentication and username-change payloads are sent as JSON over HTTPS, while
+encryption at rest is owned by the API. Never pass JWT, AWS, Mailgun, backend encryption, or OAuth
+secrets to this build. Unprefixed APP_NAME/APP_DOMAIN retain existing fallback behavior; the Vite
+environment prefix is unchanged.
 
 ## Validation
 
@@ -31,18 +32,21 @@ existing fallback behavior; the Vite environment prefix is unchanged.
 npm run lint
 npm run typecheck
 npm run build:prod
+bash test/production-build.sh
+bash test/deploy-release.sh
 ```
 
-`npm run build` performs a pure Vite build. Formatting and lint fixes are explicit commands.
-There is no frontend test runner; no new test dependency is required.
+`npm run build` performs a pure Vite build. The shell checks cover production asset key exposure
+and immutable release packaging. Formatting and lint fixes are explicit commands. There is no
+frontend test runner; no new test dependency is required.
 
 ## API compatibility
 
 The client retains `/api/auth`, `/api/users`, `/api/relay-emails`, and `/api/admin`,
 `{ result, data }` responses, accessToken in localStorage, and credentialed refresh requests.
-Refresh cookie behavior and OAuth callback paths `/login/oauth/{github|google}/callback`
-are unchanged. Keep the public domain, allowed CORS origins, and AES-GCM
-`ciphertext:iv:authTag` format unchanged.
+Email verification and login use `{ username }` and `{ username, code }`; username changes use
+`{ newUsername }` followed by `{ code }` for verification. Refresh cookie behavior and OAuth
+callback paths `/login/oauth/{github|google}/callback` are unchanged.
 
 ## Deployment and rollback
 

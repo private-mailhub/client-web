@@ -22,6 +22,33 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - name: Validate deployment request
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          EC2_SECURITY_GROUP: ${{ secrets.EC2_SECURITY_GROUP }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            printf 'Frontend deployment is allowed only from the main branch: %s\n' "$GITHUB_REF" >&2
+            exit 1
+          fi
+          : "${VITE_API_URL:?production VITE_API_URL is required}"
+          : "${AWS_ROLE_ARN:?AWS_ROLE_ARN is required}"
+          : "${EC2_SECURITY_GROUP:?EC2_SECURITY_GROUP is required}"
+          : "${EC2_HOST:?EC2_HOST is required}"
+          : "${EC2_SSH_KEY:?EC2_SSH_KEY is required}"
+          : "${EC2_KNOWN_HOSTS:?EC2_KNOWN_HOSTS is required}"
+
+          if [[ ! "$VITE_API_URL" =~ ^https://[^/?#]+$ ]]; then
+            printf 'Production VITE_API_URL must be an HTTPS origin without a path\n' >&2
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,24 +67,12 @@ jobs:
       - name: Validate production variables and build
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
-          VITE_ENCRYPTION_KEY: ${{ secrets.VITE_ENCRYPTION_KEY }}
         run: |
           set -Eeuo pipefail
 
           : "${VITE_API_URL:?VITE_API_URL is required}"
-          : "${VITE_ENCRYPTION_KEY:?VITE_ENCRYPTION_KEY is required}"
-          if [[ ! "$VITE_API_URL" =~ ^https?://[^/?#]+$ ]]; then
-            printf 'VITE_API_URL must be an HTTP(S) origin without a path\n' >&2
-            exit 1
-          fi
-          if [[ ! "$VITE_ENCRYPTION_KEY" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; then
-            printf 'VITE_ENCRYPTION_KEY must be Base64\n' >&2
-            exit 1
-          fi
-          decoded_key_bytes="$(printf '%s' "$VITE_ENCRYPTION_KEY" | base64 --decode 2>/dev/null | wc -c)"
-          decoded_key_bytes="${decoded_key_bytes//[[:space:]]/}"
-          if [[ "$decoded_key_bytes" != 32 ]]; then
-            printf 'VITE_ENCRYPTION_KEY must decode to 32 bytes\n' >&2
+          if [[ ! "$VITE_API_URL" =~ ^https://[^/?#]+$ ]]; then
+            printf 'VITE_API_URL must be an HTTPS origin without a path\n' >&2
             exit 1
           fi
 

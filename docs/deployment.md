@@ -22,11 +22,38 @@ This PR prepares deployment; it does not claim a completed production migration.
    Mailgun and CORS settings. CWD-based loading requires each release `.env` symlink. Worker also
    needs all shared validation values including PORT. Keep VITE_* build settings only in FE.
 6. Configure each repository's production environment, approval protections, SSH host/user/port,
-   known-hosts pin, security group, and AWS role. Scope frontend OIDC trust to its own repository
-   and production environment. Do not duplicate backend runtime secrets into frontend Actions.
-   Match the temporary ingress port to the SSH port; verify least privilege with the IAM owner.
-7. Supply FE `VITE_API_URL` and existing `VITE_ENCRYPTION_KEY`. Never widen Vite envPrefix.
+   known-hosts pin, security group, and AWS role. Require an approved production environment and
+   restrict deployment branches/tags to the reviewed `main` ref. Scope frontend OIDC trust to
+   `private-mailhub/client-web` and its `production` environment, and scope backend OIDC trust to
+   `private-mailhub/backend-api` and its own environment. Do not duplicate backend runtime secrets
+   into frontend Actions. Match the temporary ingress port to the SSH port; verify least privilege
+   with the IAM owner.
+7. Supply only FE `VITE_API_URL`; production must be an HTTPS origin without a path. The browser
+   must never receive `ENCRYPTION_KEY` or any other backend encryption key, and Vite's envPrefix
+   must not be widened.
 8. Validate mixed client/API versions in an isolated environment and the browser scenarios below.
+
+## Release order and key-management gate
+
+The repositories are versioned and deployed independently, but the API contract changes must be
+rolled out in a compatible order:
+
+1. Prepare and deploy the `backend-api` release first. Keep the previous API available until
+   plaintext username payloads (`username`, `code`, and `newUsername`) and the existing refresh
+   and OAuth flows have been verified with a controlled account.
+2. Build and deploy the `client-web` release second, using the API origin from the protected
+   frontend `production` environment. Verify old-client/new-API and new-client/new-API before
+   removing the old release. New-client/old-API is intentionally unsupported because the old API
+   rejects the new plaintext field names; rollback the frontend before rolling back the API.
+3. Keep both deployment workflows disabled until environment approvals, branch restrictions,
+   OIDC trust, HTTPS, and rollback checks are recorded. Do not activate both workflows in parallel
+   during the first cutover.
+
+Backend encryption keys are server-only operational secrets. Key rotation is a separate gate from
+repository separation: create a versioned key and migration/re-encryption plan, validate that all
+stored records can be read during the transition, rotate or revoke affected OAuth credentials when
+required, and retain a tested rollback path. Never copy a backend key into `.env.example`, Vite
+variables, static assets, browser storage, workflow logs, or release archives.
 
 Exact workflow secret names and inputs are listed in each `.github/workflows/deploy.yml`.
 The backend workflow **prepares** an immutable release; API/worker activation is a separate manual
@@ -43,6 +70,8 @@ Before initially installing the backend-owned `deploy/nginx.conf`, copy the **ex
 `front-end/dist/assets/` into the new shared asset directory without deleting existing hashes.
 This keeps previously open browser tabs working. Also populate the first new FE release before
 pointing Nginx at it. Keep the old checkout available for rollback.
+After the keyless client is fully cut over and the server key is rotated, remove archived assets
+that contain the retired browser key so append-only preservation does not keep it downloadable.
 
 Create `/etc/nginx/mailhub-backend-upstream.conf` with the observed current API endpoint (8080
 in the template, but verify it), for example:
@@ -122,7 +151,8 @@ For each deployment record SHA, release paths, previous targets, Node/npm versio
 Nginx site/upstream paths, timestamps and validation outcomes in the operational change record.
 Do not commit secrets, token-bearing responses or personal data.
 
-Verify old FE/new BE, new FE/old BE and new/new; existing login refresh/cookie rotation/logout;
+Verify old FE/new BE and new/new. New FE/old BE is intentionally unsupported, so rollback must
+restore the old FE before the old BE. Verify existing login refresh/cookie rotation/logout;
 email verification; GitHub/Google login/link/revoke; callback error/deep-link reload; relay CRUD;
 profile/admin views; stale tabs/assets/new tabs/back navigation; controlled mail/reply masking/SQS.
 Frontend-only deployment must preserve API/worker PID and uptime. Backend-only deployment must
