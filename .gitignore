@@ -15,18 +15,6 @@
 .DS_Store
 Thumbs.db
 
-# Backend - Gradle
-**/.gradle/
-**/build/
-**/out/
-**/bin/
-**/.gradletasknamecache
-
-# Backend - Application
-**/application.properties
-**/application-*.properties
-!**/application.properties.example
-
 # Frontend - Node
 **/node_modules/
 **/dist/
@@ -36,10 +24,11 @@ Thumbs.db
 **/.cache/
 
 # Frontend - Environment
-**/.env
-**/.env.local
-**/.env.*.local
-**/*.local
+.env*
+!.env.example
+
+# Personal settings
+.claude/settings.local.json
 
 # Logs
 *.log
@@ -49,8 +38,6 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 logs/
-# Application source module, not a runtime log directory
-!back-end/src/logs/
 
 # Temporary files
 *.tmp

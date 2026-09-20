@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
-import { createBaseConfig } from '../eslint.config.base.mjs';
+import { createBaseConfig } from './eslint.config.base.mjs';
 
 export default tseslint.config(
   ...createBaseConfig({ js, tseslint, eslintPluginPrettierRecommended }),

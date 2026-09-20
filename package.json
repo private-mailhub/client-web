@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "start": "vite",
-    "build": "vite build && prettier --write \"src/**/*.{ts,tsx}\" && eslint . --fix",
+    "build": "vite build",
     "build:prod": "vite build --mode production",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {

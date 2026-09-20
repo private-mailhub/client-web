@@ -32,15 +32,10 @@ const AdminPage = () => {
     fetchDashboard();
   }, [navigate]);
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/');
-  };
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header isLoggedIn={true} onLogout={handleLogout} />
+        <Header isLoggedIn={true} />
         <main className="flex-1 container mx-auto px-4 py-8">
           <div className="text-center">Loading...</div>
         </main>
@@ -52,7 +47,7 @@ const AdminPage = () => {
   if (accessDenied) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header isLoggedIn={true} onLogout={handleLogout} />
+        <Header isLoggedIn={true} />
         <main className="flex-1 container mx-auto px-4 py-8">
           <div className="text-center">
             <h1 className="text-2xl font-bold">Access Denied</h1>
@@ -72,7 +67,7 @@ const AdminPage = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header isLoggedIn={true} onLogout={handleLogout} />
+      <Header isLoggedIn={true} />
       <main className="flex-1 container mx-auto px-4 py-8">
         <div className="max-w-3xl mx-auto space-y-6">
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
