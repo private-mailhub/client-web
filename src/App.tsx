@@ -12,6 +12,7 @@ import AdminPage from './pages/AdminPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
+import CliAuthorizationPage from './pages/CliAuthorizationPage';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/main" element={<Index />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/cli/authorize" element={<CliAuthorizationPage />} />
           <Route
             path="/dashboard"
             element={

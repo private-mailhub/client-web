@@ -18,6 +18,27 @@ interface ApiResponse<T> {
 const ACCESS_TOKEN_KEY = 'accessToken';
 const OAUTH_INTENT_KEY = 'oauthIntent';
 
+export interface CliDeviceAuthorization {
+  clientName: string;
+  deviceName: string;
+  cliVersion: string;
+  status: 'pending' | 'approved' | 'denied';
+  expiresAt: string;
+  scopes: string[];
+}
+
+export type CliDeviceDecisionStatus = 'approved' | 'denied';
+
+export class CliDeviceAuthorizationError extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.name = 'CliDeviceAuthorizationError';
+    this.code = code;
+  }
+}
+
 export type OAuthIntent = 'login' | 'link';
 
 /**
@@ -57,6 +78,159 @@ export function consumeOAuthIntent(): OAuthIntent {
 
 export function clearOAuthIntent(): void {
   sessionStorage.removeItem(OAUTH_INTENT_KEY);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object') {
+    return false;
+  }
+  if (value === null) {
+    return false;
+  }
+  return !Array.isArray(value);
+}
+
+function isAuthorizationStatus(value: unknown): value is CliDeviceAuthorization['status'] {
+  if (value === 'pending') {
+    return true;
+  }
+  if (value === 'approved') {
+    return true;
+  }
+  return value === 'denied';
+}
+
+function isDecisionStatus(value: unknown): value is CliDeviceDecisionStatus {
+  if (value === 'approved') {
+    return true;
+  }
+  return value === 'denied';
+}
+
+function getAuthorizationData(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return value.data;
+}
+
+function getAuthorizationErrorCode(value: unknown, status: number): string {
+  if (isRecord(value)) {
+    if (typeof value.data === 'string') {
+      return value.data.trim().toLowerCase().replace(/\s+/g, '_');
+    }
+    if (typeof value.error === 'string') {
+      return value.error.trim().toLowerCase().replace(/\s+/g, '_');
+    }
+  }
+  if (status === 401) {
+    return 'unauthorized';
+  }
+  if (status === 410) {
+    return 'expired_token';
+  }
+  return 'request_failed';
+}
+
+async function readAuthorizationResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function parseCliDeviceAuthorization(value: unknown): CliDeviceAuthorization {
+  if (!isRecord(value)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (typeof value.clientName !== 'string') {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (typeof value.deviceName !== 'string') {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (typeof value.cliVersion !== 'string') {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (!isAuthorizationStatus(value.status)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (typeof value.expiresAt !== 'string') {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (Number.isNaN(Date.parse(value.expiresAt))) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (!Array.isArray(value.scopes)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (!value.scopes.every((scope) => typeof scope === 'string')) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+
+  return {
+    clientName: value.clientName,
+    deviceName: value.deviceName,
+    cliVersion: value.cliVersion,
+    status: value.status,
+    expiresAt: value.expiresAt,
+    scopes: value.scopes,
+  };
+}
+
+/** Fetch the CLI device details for a signed-in user to review. */
+export async function getCliDeviceAuthorization(userCode: string): Promise<CliDeviceAuthorization> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/auth/cli/device/authorization`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userCode }),
+  });
+  const body = await readAuthorizationResponse(response);
+
+  if (!response.ok) {
+    throw new CliDeviceAuthorizationError(getAuthorizationErrorCode(body, response.status));
+  }
+  if (!isRecord(body)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (body.result !== 'success') {
+    throw new CliDeviceAuthorizationError(getAuthorizationErrorCode(body, response.status));
+  }
+
+  return parseCliDeviceAuthorization(getAuthorizationData(body));
+}
+
+/** Submit an explicit approval or denial for the CLI device. */
+export async function decideCliDeviceAuthorization(
+  userCode: string,
+  approve: boolean,
+): Promise<CliDeviceDecisionStatus> {
+  const response = await authenticatedFetch(`${API_BASE_URL}/api/auth/cli/device/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userCode, approve }),
+  });
+  const body = await readAuthorizationResponse(response);
+
+  if (!response.ok) {
+    throw new CliDeviceAuthorizationError(getAuthorizationErrorCode(body, response.status));
+  }
+  if (!isRecord(body)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (body.result !== 'success') {
+    throw new CliDeviceAuthorizationError(getAuthorizationErrorCode(body, response.status));
+  }
+
+  const data = getAuthorizationData(body);
+  if (!isRecord(data)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  if (!isDecisionStatus(data.status)) {
+    throw new CliDeviceAuthorizationError('invalid_response');
+  }
+  return data.status;
 }
 
 /**
