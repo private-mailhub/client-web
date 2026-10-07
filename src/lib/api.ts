@@ -115,6 +115,9 @@ function getAuthorizationData(value: unknown): unknown {
 }
 
 function getAuthorizationErrorCode(value: unknown, status: number): string {
+  if (status === 401) {
+    return 'unauthorized';
+  }
   if (isRecord(value)) {
     if (typeof value.data === 'string') {
       return value.data.trim().toLowerCase().replace(/\s+/g, '_');
@@ -122,9 +125,6 @@ function getAuthorizationErrorCode(value: unknown, status: number): string {
     if (typeof value.error === 'string') {
       return value.error.trim().toLowerCase().replace(/\s+/g, '_');
     }
-  }
-  if (status === 401) {
-    return 'unauthorized';
   }
   if (status === 410) {
     return 'expired_token';

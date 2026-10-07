@@ -10,8 +10,10 @@ import { Label } from '@/components/ui/label';
 import {
   checkAuth,
   decideCliDeviceAuthorization,
+  getUserInfo,
   getCliDeviceAuthorization,
   CliDeviceAuthorizationError,
+  logout,
   type CliDeviceAuthorization,
 } from '@/lib/api';
 import {
@@ -49,11 +51,18 @@ function shouldShowCodeForm(state: AuthorizationPageState): boolean {
 function shouldShowAuthorizationDetails(
   state: AuthorizationPageState,
   authorization: CliDeviceAuthorization | null,
-): authorization is CliDeviceAuthorization {
+  username: string | null,
+): { authorization: CliDeviceAuthorization; username: string } | null {
   if (authorization === null) {
-    return false;
+    return null;
   }
-  return state === 'pending';
+  if (username === null) {
+    return null;
+  }
+  if (state !== 'pending') {
+    return null;
+  }
+  return { authorization, username };
 }
 
 function getApprovalButtonLabel(isSubmitting: boolean): string {
@@ -61,6 +70,13 @@ function getApprovalButtonLabel(isSubmitting: boolean): string {
     return 'Submitting…';
   }
   return 'Approve device';
+}
+
+function getSwitchAccountButtonLabel(isSwitchingAccount: boolean): string {
+  if (isSwitchingAccount) {
+    return 'Switching account…';
+  }
+  return 'Switch account';
 }
 
 function isFinalPageState(state: AuthorizationPageState): boolean {
@@ -149,17 +165,56 @@ function getStateTitle(state: AuthorizationPageState): string {
 
 function AuthorizationDetails({
   authorization,
+  username,
   isSubmitting,
+  isSwitchingAccount,
   feedback,
+  accountFeedback,
+  accountChangedFeedback,
   onDecision,
+  onSwitchAccount,
 }: {
   authorization: CliDeviceAuthorization;
+  username: string;
   isSubmitting: boolean;
+  isSwitchingAccount: boolean;
   feedback: string;
+  accountFeedback: string;
+  accountChangedFeedback: string;
   onDecision: (approve: boolean) => void;
+  onSwitchAccount: () => void;
 }) {
   return (
     <div className="space-y-6">
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm">
+          Signed in as <span className="font-medium">{username}</span>
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isSubmitting || isSwitchingAccount}
+          onClick={onSwitchAccount}
+        >
+          {getSwitchAccountButtonLabel(isSwitchingAccount)}
+        </Button>
+      </div>
+
+      {accountFeedback !== '' && (
+        <Alert variant="destructive">
+          <AlertTitle>Could not switch accounts</AlertTitle>
+          <AlertDescription>{accountFeedback}</AlertDescription>
+        </Alert>
+      )}
+
+      {accountChangedFeedback !== '' && (
+        <Alert>
+          <AlertTitle>Review the account before continuing</AlertTitle>
+          <AlertDescription>{accountChangedFeedback}</AlertDescription>
+        </Alert>
+      )}
+
       <dl className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-md border bg-background p-4">
           <dt className="text-sm text-muted-foreground">Application</dt>
@@ -203,12 +258,16 @@ function AuthorizationDetails({
         <Button
           type="button"
           variant="outline"
-          disabled={isSubmitting}
+          disabled={isSubmitting || isSwitchingAccount}
           onClick={() => onDecision(false)}
         >
           Deny request
         </Button>
-        <Button type="button" disabled={isSubmitting} onClick={() => onDecision(true)}>
+        <Button
+          type="button"
+          disabled={isSubmitting || isSwitchingAccount}
+          onClick={() => onDecision(true)}
+        >
           {getApprovalButtonLabel(isSubmitting)}
         </Button>
       </div>
@@ -222,16 +281,29 @@ const CliAuthorizationPage = () => {
   const [pageState, setPageState] = useState<AuthorizationPageState>(getInitialPageState);
   const [userCode, setUserCode] = useState(() => getCliAuthorizationCode() ?? '');
   const [authorization, setAuthorization] = useState<CliDeviceAuthorization | null>(null);
+  const [accountUsername, setAccountUsername] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [accountFeedback, setAccountFeedback] = useState('');
+  const [accountChangedFeedback, setAccountChangedFeedback] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
 
   const loadAuthorization = useCallback(
     async (code: string) => {
       setPageState('loading');
       setFeedback('');
+      setAccountFeedback('');
+      setAccountChangedFeedback('');
       setAuthorization(null);
+      setAccountUsername(null);
 
       try {
+        const userInfo = await getUserInfo();
+        if (typeof userInfo.username !== 'string' || userInfo.username.trim() === '') {
+          throw new Error('invalid_user_info');
+        }
+        setAccountUsername(userInfo.username.trim());
+
         const result = await getCliDeviceAuthorization(code);
         setAuthorization(result);
 
@@ -264,6 +336,10 @@ const CliAuthorizationPage = () => {
           return;
         }
         if (isUnauthorizedAuthorizationError(error)) {
+          navigate('/login', { replace: true });
+          return;
+        }
+        if (!checkAuth()) {
           navigate('/login', { replace: true });
           return;
         }
@@ -328,6 +404,9 @@ const CliAuthorizationPage = () => {
     if (pageState !== 'pending') {
       return;
     }
+    if (isSwitchingAccount) {
+      return;
+    }
 
     const code = getCliAuthorizationCode();
     if (code === null) {
@@ -339,6 +418,20 @@ const CliAuthorizationPage = () => {
     setIsSubmitting(true);
     setFeedback('');
     try {
+      const userInfo = await getUserInfo();
+      if (typeof userInfo.username !== 'string' || userInfo.username.trim() === '') {
+        throw new Error('invalid_user_info');
+      }
+      const currentUsername = userInfo.username.trim();
+      if (currentUsername !== accountUsername) {
+        setAccountUsername(currentUsername);
+        setAccountChangedFeedback(
+          `The signed-in account changed to ${currentUsername}. Review this request for that account before choosing again.`,
+        );
+        return;
+      }
+
+      setAccountChangedFeedback('');
       const status = await decideCliDeviceAuthorization(code, approve);
       clearCliAuthorizationState();
       if (status === 'approved') {
@@ -361,12 +454,32 @@ const CliAuthorizationPage = () => {
         navigate('/login', { replace: true });
         return;
       }
+      if (!checkAuth()) {
+        navigate('/login', { replace: true });
+        return;
+      }
 
       setPageState('pending');
       setFeedback('We could not submit your decision. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleSwitchAccount = async () => {
+    const storedCode = getCliAuthorizationCode();
+    const codeToPreserve = storedCode ?? normalizeCliAuthorizationCode(userCode);
+    const savedCode = saveCliAuthorizationCode(codeToPreserve);
+    if (savedCode === null) {
+      setAccountFeedback(
+        'Your CLI authorization code could not be saved. Keep this page open and try again.',
+      );
+      return;
+    }
+
+    setIsSwitchingAccount(true);
+    await logout();
+    navigate('/login', { replace: true });
   };
 
   const handleStartOver = () => {
@@ -379,6 +492,11 @@ const CliAuthorizationPage = () => {
   };
 
   const isLoggedIn = checkAuth();
+  const authorizationDetails = shouldShowAuthorizationDetails(
+    pageState,
+    authorization,
+    accountUsername,
+  );
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -451,12 +569,17 @@ const CliAuthorizationPage = () => {
                 </div>
               )}
 
-              {shouldShowAuthorizationDetails(pageState, authorization) && (
+              {authorizationDetails !== null && (
                 <AuthorizationDetails
-                  authorization={authorization}
+                  authorization={authorizationDetails.authorization}
+                  username={authorizationDetails.username}
                   isSubmitting={isSubmitting}
+                  isSwitchingAccount={isSwitchingAccount}
                   feedback={feedback}
+                  accountFeedback={accountFeedback}
+                  accountChangedFeedback={accountChangedFeedback}
                   onDecision={(approve) => void handleDecision(approve)}
+                  onSwitchAccount={() => void handleSwitchAccount()}
                 />
               )}
 
