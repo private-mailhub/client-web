@@ -10,6 +10,7 @@ import {
   setAccessToken,
   type OAuthIntent,
 } from '@/lib/api';
+import { getPostLoginTarget } from '@/lib/cli-authorization-state';
 import { OAuthProvider } from '@/lib/oauth-provider.enum';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -75,7 +76,7 @@ const OAuthCallbackPage = () => {
           }
 
           setAccessToken(result.accessToken);
-          navigate('/dashboard', { replace: true });
+          navigate(getPostLoginTarget(), { replace: true });
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'OAuth login failed');

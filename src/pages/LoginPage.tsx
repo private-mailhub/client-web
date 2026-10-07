@@ -6,6 +6,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import OAuthButtons from '@/components/OAuthButtons';
 import { sendVerificationCode, login, oauthLoginApple, checkAuth, setAccessToken } from '@/lib/api';
+import { getPostLoginTarget } from '@/lib/cli-authorization-state';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,7 +31,7 @@ const LoginPage = () => {
   // Redirect to dashboard if already logged in
   useEffect(() => {
     if (checkAuth()) {
-      navigate('/dashboard', { replace: true });
+      navigate(getPostLoginTarget(), { replace: true });
     }
   }, [navigate]);
 
@@ -62,7 +63,7 @@ const LoginPage = () => {
 
     try {
       await login(userEmail, code);
-      navigate('/dashboard', { replace: true });
+      navigate(getPostLoginTarget(), { replace: true });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to verify code');
       setShowErrorDialog(true);
@@ -82,7 +83,7 @@ const LoginPage = () => {
     try {
       const { accessToken } = await oauthLoginApple(idToken);
       setAccessToken(accessToken);
-      navigate('/dashboard', { replace: true });
+      navigate(getPostLoginTarget(), { replace: true });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Apple login failed');
       setShowErrorDialog(true);
