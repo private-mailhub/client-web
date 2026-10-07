@@ -113,14 +113,6 @@ function isUnauthorizedAuthorizationError(error: unknown): boolean {
   return error.code === 'unauthorized';
 }
 
-function hasExpired(expiresAt: string): boolean {
-  const expiresAtTime = Date.parse(expiresAt);
-  if (Number.isNaN(expiresAtTime)) {
-    return false;
-  }
-  return expiresAtTime <= Date.now();
-}
-
 function formatExpiry(expiresAt: string): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
@@ -317,12 +309,6 @@ const CliAuthorizationPage = () => {
           setPageState('denied');
           return;
         }
-        if (hasExpired(result.expiresAt)) {
-          clearCliAuthorizationState();
-          setPageState('expired');
-          return;
-        }
-
         setPageState('pending');
       } catch (error) {
         if (isExpiredAuthorizationError(error)) {
