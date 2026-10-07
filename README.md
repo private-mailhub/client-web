@@ -1,9 +1,11 @@
+<p align="center">
+  <img src="public/logo.png" alt="Mailhub logo" width="120" />
+</p>
+
 # Mailhub frontend
 
 React 18, TypeScript, Vite, and Tailwind UI for Mailhub.
 [API and worker repository](https://github.com/private-mailhub/backend-api).
-
-![Mailhub](public/landing-main.png)
 
 ## Development
 
